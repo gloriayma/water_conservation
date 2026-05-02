@@ -120,8 +120,10 @@ def impute_solvents_with_num_hbonds(
                 new_coords = new_impute_solvent(
                     hbond_candidate_atoms,
                     hbond_candidate_pairs,
-                    n_function(sample_attempts),
+                    # n_function(sample_attempts),
+                    3,
                 )
+                # print(n_function(sample_attempts))
             except Exception:
                 new_coords = None
             if new_coords is None:
@@ -140,7 +142,7 @@ def impute_solvents_with_num_hbonds(
                 or sample_attempts > max_sample_attempts
             ):
                 break
-
+        print(f"{sample_attempts=} until a {n_function(sample_attempts)=} h-bond thing was found, for the {impute_idx=}th water.")
         imputed_solvent_coords[impute_idx]["coords"] = new_coords
         imputed_solvent_atoms[impute_idx] = ("O", new_coords, True, 50.0, 1.0)
         if one_solvent_per_chain:
