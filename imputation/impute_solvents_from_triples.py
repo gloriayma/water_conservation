@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
+from scipy.spatial import KDTree
 
 from boltzgen.data import const
 from boltzgen.data.data import Chain, Structure
@@ -33,7 +34,16 @@ def place_water_from_atom_triple(
     hbond_length: float = 2.8,
     epsilon: float = 1e-4,
 ) -> np.ndarray | None:
-    """Place one water oxygen from a specific triple of atom coordinates."""
+    """
+    Return a tuple of coordinates for two water oxygen atoms 
+    equidistant from the three atoms in the triple, hbond_length away from each. 
+
+    Find the circumcenter, and follow the normal vector. 
+
+    This yields two solutions. We return both. 
+
+    Returns none if the atoms are collinear, or if the circumradius is greater than hbond_length.
+    """
     if atom_coords.shape != (3, 3):
         raise ValueError("atom_coords must have shape (3, 3)")
 
@@ -47,8 +57,45 @@ def place_water_from_atom_triple(
         return None
 
     height = np.sqrt(max(hbond_length**2 - circumradius**2, 0.0))
-    return circumcenter + height * normal
+    return (circumcenter + height * normal, circumcenter - height * normal
+)
 
+
+def kdtree_find_atom_triples_for_three_hbonds(
+    structure: Structure,
+    hbond_length: float = 2.8,
+    min_pair_dist: float = HBOND_PAIR_MIN_DIST,
+    max_pair_dist: float = HBOND_PAIR_MAX_DIST,
+    epsilon: float = 1e-4,
+) -> np.ndarray:
+    """
+    Find atom triples for three-H-bond water placement using a k-d tree.
+    Returns a list of triples of indeces into the candidate atom coordinates.
+    Pairwise distances are all less than max_pair_dist.
+    """
+    candidate_atom_indices, candidate_atom_coords = _get_hbond_candidate_atom_data(
+        structure
+    )
+    if len(candidate_atom_indices) < 3:
+        return np.zeros((0, 3), dtype=np.int64)
+    
+    kdtree = KDTree(candidate_atom_coords)
+    neighbor_lists = kdtree.query_ball_tree(kdtree, r=max_pair_dist)
+    
+    neighbors = []
+    for i, neighbor in enumerate(neighbor_lists):
+        neighbors.append(set(j for j in neighbor if j > i)) # j > i avoids duplicates
+
+    triples = []
+
+    for i in range(len(candidate_atom_coords)):
+        for j in neighbors[i]:
+            # k must be in neighbor list of both i and j
+            common = neighbors[i].intersection(neighbors[j])
+            for k in common:
+                triples.append((i, j, k))
+
+    return triples
 
 def find_atom_triples_for_three_hbonds(
     structure: Structure,
@@ -99,6 +146,7 @@ def find_atom_triples_for_three_hbonds(
     if not triples:
         return np.zeros((0, 3), dtype=np.int64)
     return np.array(triples, dtype=np.int64)
+
 
 
 def impute_solvents_from_atom_triples(
