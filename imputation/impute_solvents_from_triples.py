@@ -17,6 +17,15 @@ HBOND_PAIR_MIN_DIST = 0 #3.13
 HBOND_PAIR_MAX_DIST = 5.6 #8# 5.09
 
 
+def get_atom_to_residue_index(structure: Structure) -> np.ndarray:
+    atom_to_residue = np.full(len(structure.atoms), -1, dtype=np.int64)
+    for res_idx, residue in enumerate(structure.residues):
+        atom_start = residue["atom_idx"]
+        atom_end = atom_start + residue["atom_num"]
+        atom_to_residue[atom_start:atom_end] = res_idx
+    return atom_to_residue
+
+
 def get_circumcenter(a, b, c, epsilon=1e-4):
     """
     Calculates the circumcenter of three points a, b, and c, and returns
@@ -108,6 +117,8 @@ def kdtree_find_water_coords_for_three_hbonds(
     candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
         structure
     )
+    atom_to_residue = get_atom_to_residue_index(structure)
+    candidate_residue_indices = atom_to_residue[candidate_atom_indices]
     kdtree_find_start = perf_counter()
 
 
@@ -135,6 +146,14 @@ def kdtree_find_water_coords_for_three_hbonds(
             common = neighbors[i].intersection(neighbors[j])
             for k in common:
                 num_triples += 1
+                if len(
+                    {
+                        candidate_residue_indices[i],
+                        candidate_residue_indices[j],
+                        candidate_residue_indices[k],
+                    }
+                ) < 3:
+                    continue
 
                 water_coords = place_water_from_atom_triple(
                     candidate_atom_coords[i],
