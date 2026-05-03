@@ -340,10 +340,12 @@ def _append_imputed_solvents(
 
 def filter_solvent_clashes(
     structure: Structure,
-    min_dist: float = 2.5,
+    protein_clash_rad: float,
+    solvent_clash_rad: float,
 ) -> Structure:
     """
-    Remove solvent molecules whose oxygen clashes within ``min_dist``.
+    Remove solvent molecules whose oxygen clashes with a molecule within protein_clash_rad, 
+    or wiht another solvent molecule within solvent_clash_rad.
 
     This is a two-stage post-processing filter:
     1. Drop solvent molecules whose oxygen clashes with any non-solvent atom.
@@ -385,11 +387,13 @@ def filter_solvent_clashes(
     solvent_coords = atom_coords[solvent_atom_indices]
     nonsolvent_atom_mask = (~solvent_atom_mask) & atom_present
     nonsolvent_coords = atom_coords[nonsolvent_atom_mask]
-    clash_radius = np.nextafter(min_dist, 0.0)
+    # clash_radius = np.nextafter(min_dist, 0.0)
+    protein_clash_radius = np.nextafter(protein_clash_rad, 0.0)
+    solvent_clash_radius = np.nextafter(solvent_clash_rad, 0.0)
 
     if len(nonsolvent_coords) > 0:
         fixed_atom_kdtree = KDTree(nonsolvent_coords)
-        fixed_atom_hits = fixed_atom_kdtree.query_ball_point(solvent_coords, r=clash_radius)
+        fixed_atom_hits = fixed_atom_kdtree.query_ball_point(solvent_coords, r=protein_clash_radius)
         clashes_with_nonsolvent = np.array(
             [len(hit_indices) > 0 for hit_indices in fixed_atom_hits],
             dtype=bool,
@@ -407,7 +411,7 @@ def filter_solvent_clashes(
     proposed_water_kdtree = KDTree(surviving_coords)
     clash_neighbors = proposed_water_kdtree.query_ball_tree(
         proposed_water_kdtree,
-        r=clash_radius,
+        r=solvent_clash_radius,
     )
 
     blocked = np.zeros(len(surviving_chain_indices), dtype=bool)
@@ -422,5 +426,5 @@ def filter_solvent_clashes(
             blocked[j] = True
             mask[surviving_chain_indices[j]] = False
 
-    print(f"Number of surviving waters after clash with other waters: {len(surviving_chain_indices)}")
+    print(f"Number of surviving waters after clash with other waters: {np.sum(mask[surviving_chain_indices])}")
     return rebuild_structure_with_mask(structure, mask)

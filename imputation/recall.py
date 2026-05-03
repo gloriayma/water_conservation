@@ -142,7 +142,7 @@ def compare_structure_waters(
 
 
 
-def recall_result(PDB_ID, recall_threshold, collision_min_dist):
+def recall_result(PDB_ID, recall_threshold, protein_clash_rad, solvent_clash_rad):
     npz_path = resolve_npz_path(PDB_ID, NPZ_ROOT)
     gt_structure = Structure.load(npz_path)
     gt_structure = gt_structure.to_one_solvent_per_chain(gt_structure)
@@ -159,7 +159,8 @@ def recall_result(PDB_ID, recall_threshold, collision_min_dist):
     )
     no_collisions = filter_solvent_clashes(
         imputed,
-        min_dist=collision_min_dist,
+        protein_clash_rad=protein_clash_rad,
+        solvent_clash_rad=solvent_clash_rad,
     )
 
     result = compare_structure_waters(
