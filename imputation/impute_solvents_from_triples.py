@@ -69,18 +69,19 @@ def get_hbond_candidate_atom_data(
 def place_water_from_atom_triple(
     # atom_coords: np.ndarray,
     coords_i, coords_j, coords_k,
+    max_hbond_length: float,
     hbond_length: float = 2.8,
     epsilon: float = 1e-4,
 ) -> np.ndarray | None:
     """
-    Return a tuple of coordinates for two water oxygen atoms 
-    equidistant from the three atoms in the triple, hbond_length away from each. 
+    Return an array of placed water oxygen coordinates with shape (n, 3).
 
     Find the circumcenter, and follow the normal vector. 
 
     This yields two solutions. We return both. 
 
-    Returns none if the atoms are collinear, or if the circumradius is greater than hbond_length.
+    Returns none if the atoms are collinear (TODO). If the circumradius is greater than hbond_length, but less
+    than max_hbond_length, place at circumcenter. Otherwise, raise an error.
     """
 
     circumcenter, circumradius, normal = get_circumcenter(
@@ -90,19 +91,31 @@ def place_water_from_atom_triple(
         epsilon=epsilon,
     )
 
-    if circumcenter is None or circumradius > hbond_length:
+    if circumcenter is None:
+        print("Collinear atoms. TODO: handle this")
+        return None
+    if circumradius > max_hbond_length:
+        # raise ValueError(f"Circumradius {circumradius} is greater than max_hbond_length {max_hbond_length}")
+        # print(f"Circumradius {circumradius} is greater than max_hbond_length {max_hbond_length}. TODO: handle this")
         return None
 
+    if circumradius > hbond_length:
+        # Keep the return shape consistent with the two-solution case.
+        return circumcenter[None, :]
+
     height = np.sqrt(max(hbond_length**2 - circumradius**2, 0.0))
-    return (circumcenter + height * normal, circumcenter - height * normal)
+    return np.stack(
+        (circumcenter + height * normal, circumcenter - height * normal),
+        axis=0,
+    )
 
 
 
 def kdtree_find_water_coords_for_three_hbonds(
     structure: Structure,
+    max_hbond_length: float,
     hbond_length: float = 2.8,
-    min_pair_dist: float = HBOND_PAIR_MIN_DIST,
-    max_pair_dist: float = HBOND_PAIR_MAX_DIST,
+    # min_pair_dist: float = HBOND_PAIR_MIN_DIST,
     epsilon: float = 1e-4,
 ) -> np.ndarray:
     """
@@ -126,6 +139,7 @@ def kdtree_find_water_coords_for_three_hbonds(
         return np.zeros((0, 3), dtype=np.int64)
 
     kdtree = KDTree(candidate_atom_coords)
+    max_pair_dist = 2*max_hbond_length
     neighbor_lists = kdtree.query_ball_tree(kdtree, r=max_pair_dist)
     print(f"Number of neighbor lists: {len(neighbor_lists)}")
     print(f"Neighbor lists: {neighbor_lists[:10]}")
@@ -159,12 +173,12 @@ def kdtree_find_water_coords_for_three_hbonds(
                     candidate_atom_coords[i],
                     candidate_atom_coords[j],
                     candidate_atom_coords[k],
+                    max_hbond_length=max_hbond_length,
                     hbond_length=hbond_length,
                     epsilon=epsilon,
                 )
                 if water_coords is not None:
-                    for water_coord in water_coords:
-                        placed_water_coords.append(water_coord)
+                    placed_water_coords.extend(water_coords)
     
     place_water_time = perf_counter() - place_water_start
     print(f"{place_water_time=:.2f}s")
@@ -176,10 +190,11 @@ def kdtree_find_water_coords_for_three_hbonds(
 
 def impute_solvents_from_atom_triples(
     structure: Structure,
+    max_hbond_length: float, 
     one_solvent_per_chain: bool = True,
     hbond_length: float = 2.8,
-    min_pair_dist: float = HBOND_PAIR_MIN_DIST,
-    max_pair_dist: float = HBOND_PAIR_MAX_DIST,
+    # min_hbond_length: float,
+    # max_pair_dist: float = HBOND_PAIR_MAX_DIST,
     epsilon: float = 1e-4,
 ) -> Structure:
     """
@@ -191,9 +206,9 @@ def impute_solvents_from_atom_triples(
   
     placed_water_coords = kdtree_find_water_coords_for_three_hbonds(
         structure,
+        max_hbond_length=max_hbond_length,
         hbond_length=hbond_length,
-        min_pair_dist=min_pair_dist,
-        max_pair_dist=max_pair_dist,
+        # min_pair_dist=min_pair_dist,
         epsilon=epsilon,
     )
 

@@ -16,7 +16,7 @@ from gloria_hbond_helpers import *
 
 
 NPZ_ROOT = Path("/data/rbg/shared/datasets/processed_rcsb/rcsb_solvents/structures")
-TRIPLE_HBOND_PAIR_MAX_DIST = 5.6
+TRIPLE_HBOND_PAIR_MAX_DIST = "noooooooo" #5.6
 COLLISION_MIN_DIST = "nOOOO"
 
 
@@ -142,7 +142,7 @@ def compare_structure_waters(
 
 
 
-def recall_result(PDB_ID, recall_threshold, protein_clash_rad, solvent_clash_rad):
+def recall_result(PDB_ID, recall_threshold, protein_clash_rad, solvent_clash_rad, max_hbond_length):
     npz_path = resolve_npz_path(PDB_ID, NPZ_ROOT)
     gt_structure = Structure.load(npz_path)
     gt_structure = gt_structure.to_one_solvent_per_chain(gt_structure)
@@ -154,8 +154,8 @@ def recall_result(PDB_ID, recall_threshold, protein_clash_rad, solvent_clash_rad
     gt_stripped_structure = gt_structure.remove_solvents()
     imputed = impute_solvents_from_atom_triples(
         gt_stripped_structure,
-        one_solvent_per_chain=True,
-        max_pair_dist=TRIPLE_HBOND_PAIR_MAX_DIST,
+        max_hbond_length=max_hbond_length,
+
     )
     no_collisions = filter_solvent_clashes(
         imputed,

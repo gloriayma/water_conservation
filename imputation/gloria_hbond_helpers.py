@@ -5,7 +5,8 @@ import numpy as np
 from boltzgen.data import const
 from boltzgen.data.data import Structure
 
-
+BOLTZGEN_HBOND_MIN_DIST = 0.0
+BOLTZGEN_HBOND_MAX_DIST = 5.6
 
 
 def gloria_get_solvent_hbond_counts_and_mask(
