@@ -259,6 +259,7 @@ def _append_imputed_solvents(
     imputed_solvent_atoms = np.zeros(num_to_impute, dtype=atoms.dtype)
     imputed_solvent_residues = np.zeros(num_to_impute, dtype=residues.dtype)
     imputed_solvent_chains = None
+    
 
     if not one_solvent_per_chain:
         atom_idx = chains[-1]["atom_idx"] + chains[-1]["atom_num"]
