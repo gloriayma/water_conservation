@@ -88,3 +88,33 @@ def gloria_get_solvent_hbond_mask(
     keep_mask = np.zeros(len(structure.chains), dtype=bool)
     keep_mask[solvent_chain_mask] = num_hbonds[solvent_chain_mask] >= min_hbonds
     return keep_mask
+
+
+
+def gloria_remove_weak_solvents(
+    structure: Structure,
+    min_hbonds: int = 2,
+) -> Structure:
+    """Remove solvents that have fewer than ``min_hbonds`` H-bonds."""
+    mask = structure.mask.copy()
+    num_hbonds, solvent_chain_mask = gloria_get_solvent_hbond_counts_and_mask(structure)
+    mask[solvent_chain_mask] = num_hbonds[solvent_chain_mask] >= min_hbonds
+    return rebuild_structure_with_mask(structure, mask)
+
+
+def rebuild_structure_with_mask(
+    structure: Structure,
+    mask: np.ndarray,
+) -> Structure:
+    filtered_structure = Structure(
+        atoms=structure.atoms,
+        bonds=structure.bonds,
+        residues=structure.residues,
+        chains=structure.chains,
+        interfaces=structure.interfaces,
+        mask=mask,
+        coords=structure.coords,
+        ensemble=structure.ensemble,
+    )
+    return filtered_structure.remove_invalid_chains()
+

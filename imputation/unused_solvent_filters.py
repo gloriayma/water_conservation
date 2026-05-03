@@ -7,21 +7,21 @@ from boltzgen.data.data import Structure
 from gloria_hbond_helpers import gloria_get_solvent_hbond_counts_and_mask
 
 
-def _gloria_rebuild_structure_with_mask(
-    structure: Structure,
-    mask: np.ndarray,
-) -> Structure:
-    filtered_structure = Structure(
-        atoms=structure.atoms,
-        bonds=structure.bonds,
-        residues=structure.residues,
-        chains=structure.chains,
-        interfaces=structure.interfaces,
-        mask=mask,
-        coords=structure.coords,
-        ensemble=structure.ensemble,
-    )
-    return filtered_structure.remove_invalid_chains()
+# def rebuild_structure_with_mask(
+#     structure: Structure,
+#     mask: np.ndarray,
+# ) -> Structure:
+#     filtered_structure = Structure(
+#         atoms=structure.atoms,
+#         bonds=structure.bonds,
+#         residues=structure.residues,
+#         chains=structure.chains,
+#         interfaces=structure.interfaces,
+#         mask=mask,
+#         coords=structure.coords,
+#         ensemble=structure.ensemble,
+#     )
+#     return filtered_structure.remove_invalid_chains()
 
 
 def gloria_remove_low_b_factor_solvents(
@@ -62,15 +62,15 @@ def gloria_remove_low_b_factor_solvents(
         if bfactor < threshold:
             mask[chain_idx] = False
 
-    return _gloria_rebuild_structure_with_mask(structure, mask)
+    return rebuild_structure_with_mask(structure, mask)
 
 
-def gloria_remove_weak_solvents(
-    structure: Structure,
-    min_hbonds: int = 2,
-) -> Structure:
-    """Remove solvents that have fewer than ``min_hbonds`` H-bonds."""
-    mask = structure.mask.copy()
-    num_hbonds, solvent_chain_mask = gloria_get_solvent_hbond_counts_and_mask(structure)
-    mask[solvent_chain_mask] = num_hbonds[solvent_chain_mask] >= min_hbonds
-    return _gloria_rebuild_structure_with_mask(structure, mask)
+# def gloria_remove_weak_solvents(
+#     structure: Structure,
+#     min_hbonds: int = 2,
+# ) -> Structure:
+#     """Remove solvents that have fewer than ``min_hbonds`` H-bonds."""
+#     mask = structure.mask.copy()
+#     num_hbonds, solvent_chain_mask = gloria_get_solvent_hbond_counts_and_mask(structure)
+#     mask[solvent_chain_mask] = num_hbonds[solvent_chain_mask] >= min_hbonds
+#     return rebuild_structure_with_mask(structure, mask)
