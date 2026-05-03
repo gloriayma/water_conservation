@@ -31,7 +31,8 @@ def get_hbond_candidate_atom_data(
 
 
 def place_water_from_atom_triple(
-    atom_coords: np.ndarray,
+    # atom_coords: np.ndarray,
+    coords_i, coords_j, coords_k,
     hbond_length: float = 2.8,
     epsilon: float = 1e-4,
 ) -> np.ndarray | None:
@@ -45,15 +46,26 @@ def place_water_from_atom_triple(
 
     Returns none if the atoms are collinear, or if the circumradius is greater than hbond_length.
     """
-    if atom_coords.shape != (3, 3):
-        raise ValueError("atom_coords must have shape (3, 3)")
+    # if atom_coords.shape != (3, 3):
+    #     raise ValueError("atom_coords must have shape (3, 3)")
+
+    # circumcenter, circumradius, normal = get_circumcenter(
+    #     atom_coords[0],
+    #     atom_coords[1],
+    #     atom_coords[2],
+    #     epsilon=epsilon,
+    # )
+
+    
+
 
     circumcenter, circumradius, normal = get_circumcenter(
-        atom_coords[0],
-        atom_coords[1],
-        atom_coords[2],
+        coords_i,
+        coords_j,
+        coords_k,
         epsilon=epsilon,
     )
+
     if circumcenter is None or circumradius > hbond_length:
         return None
 
@@ -106,6 +118,70 @@ def kdtree_find_atom_triples_for_three_hbonds(
     if not triples:
         return np.zeros((0, 3), dtype=np.int64)
     return np.array(triples, dtype=np.int64)
+
+
+
+def kdtree_find_water_coords_for_three_hbonds(
+    structure: Structure,
+    hbond_length: float = 2.8,
+    min_pair_dist: float = HBOND_PAIR_MIN_DIST,
+    max_pair_dist: float = HBOND_PAIR_MAX_DIST,
+    epsilon: float = 1e-4,
+) -> np.ndarray:
+    """
+    New version: returns the coordinates of the placed water(s) for each triple. 
+    (Either 0, 1, or 2 coordinates per triple.)
+        Find atom triples for three-H-bond water placement using a k-d tree.
+        Pairwise distances are all less than max_pair_dist.
+
+
+    """
+    candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
+        structure
+    )
+    kdtree_find_start = perf_counter()
+
+
+    if len(candidate_atom_indices) < 3:
+        return np.zeros((0, 3), dtype=np.int64)
+
+    kdtree = KDTree(candidate_atom_coords)
+    neighbor_lists = kdtree.query_ball_tree(kdtree, r=max_pair_dist)
+    print(f"Number of neighbor lists: {len(neighbor_lists)}")
+    print(f"Neighbor lists: {neighbor_lists[:10]}")
+    
+    neighbors = []
+    for i, neighbor in enumerate(neighbor_lists):
+        neighbors.append(set(j for j in neighbor if j > i))  # j > i avoids duplicates
+
+    neighbor_list_time = perf_counter() - kdtree_find_start
+    print(f"{neighbor_list_time=:.2f}s")
+    place_water_start = perf_counter()
+
+    placed_water_coords = [] # speed up by allocating array ahead of time? 
+
+    for i in range(len(candidate_atom_coords)):
+        for j in neighbors[i]:
+            # k must be in neighbor list of both i and j
+            common = neighbors[i].intersection(neighbors[j])
+            for k in common:
+
+                water_coords = place_water_from_atom_triple(
+                    candidate_atom_coords[i],
+                    candidate_atom_coords[j],
+                    candidate_atom_coords[k],
+                    hbond_length=hbond_length,
+                    epsilon=epsilon,
+                )
+                if water_coords is not None:
+                    for water_coord in water_coords:
+                        placed_water_coords.append(water_coord)
+    
+    place_water_time = perf_counter() - place_water_start
+    print(f"{place_water_time=:.2f}s")
+
+    return np.array(placed_water_coords, dtype=candidate_atom_coords.dtype)
+
 
 def find_atom_triples_for_three_hbonds(
     structure: Structure,
@@ -182,44 +258,52 @@ def impute_solvents_from_atom_triples(
     # )
     start_total = perf_counter()
     start = perf_counter()
-    atom_triples = kdtree_find_atom_triples_for_three_hbonds(
+    # atom_triples = kdtree_find_atom_triples_for_three_hbonds(
+    #     structure,
+    #     hbond_length=hbond_length,
+    #     min_pair_dist=min_pair_dist,
+    #     max_pair_dist=max_pair_dist,
+    #     epsilon=epsilon,
+    # )
+    # kdtree_find_triples_time = perf_counter() - start
+    # print(f"{kdtree_find_triples_time=:.2f}s")
+
+    # if len(atom_triples) == 0:
+    #     return structure
+
+    # place_water_start = perf_counter()
+    # coords = structure.coords.copy()
+    # placed_water_coords = np.zeros(2 * len(atom_triples), dtype=coords.dtype)
+    # num_placed_waters = 0
+    # for atom_triple in atom_triples:
+    #     new_coords = place_water_from_atom_triple(
+    #         structure.coords["coords"][atom_triple],
+    #         hbond_length=hbond_length,
+    #         epsilon=epsilon,
+    #     )
+    #     if new_coords is None:
+    #         continue
+    #     for water_coords in new_coords:
+    #         placed_water_coords[num_placed_waters]["coords"] = water_coords
+    #         num_placed_waters += 1
+        
+    # place_water_time = perf_counter() - place_water_start
+    # print(f"{place_water_time=:.2f}s")
+
+    # if num_placed_waters == 0:
+    #     return structure
+
+    placed_water_coords = kdtree_find_water_coords_for_three_hbonds(
         structure,
         hbond_length=hbond_length,
         min_pair_dist=min_pair_dist,
         max_pair_dist=max_pair_dist,
         epsilon=epsilon,
     )
-    kdtree_find_triples_time = perf_counter() - start
-    print(f"{kdtree_find_triples_time=:.2f}s")
-
-    if len(atom_triples) == 0:
-        return structure
-
-    place_water_start = perf_counter()
-    coords = structure.coords.copy()
-    placed_water_coords = np.zeros(2 * len(atom_triples), dtype=coords.dtype)
-    num_placed_waters = 0
-    for atom_triple in atom_triples:
-        new_coords = place_water_from_atom_triple(
-            structure.coords["coords"][atom_triple],
-            hbond_length=hbond_length,
-            epsilon=epsilon,
-        )
-        if new_coords is None:
-            continue
-        for water_coords in new_coords:
-            placed_water_coords[num_placed_waters]["coords"] = water_coords
-            num_placed_waters += 1
-        
-    place_water_time = perf_counter() - place_water_start
-    print(f"{place_water_time=:.2f}s")
-
-    if num_placed_waters == 0:
-        return structure
 
     return _append_imputed_solvents(
         structure,
-        placed_water_coords[:num_placed_waters],
+        placed_water_coords,
         one_solvent_per_chain=one_solvent_per_chain,
     )
 
@@ -232,6 +316,10 @@ def _append_imputed_solvents(
     append_imputed_solvents_start = perf_counter()
     if len(imputed_solvent_coords) == 0:
         return structure
+
+    placed_water_coords_array = np.zeros(len(imputed_solvent_coords), dtype=structure.coords.dtype)
+    placed_water_coords_array["coords"] = np.asarray(imputed_solvent_coords)
+    imputed_solvent_coords = placed_water_coords_array
 
     num_solvents = 0
     entities = set()
