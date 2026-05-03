@@ -13,7 +13,7 @@ from new_impute_solvent import get_circumcenter
 
 HBOND_CANDIDATE_PREFIXES = ("N", "O", "F", "S")
 HBOND_PAIR_MIN_DIST = 3.13
-HBOND_PAIR_MAX_DIST = 8# 5.09
+HBOND_PAIR_MAX_DIST = 5.6 #8# 5.09
 
 
 def get_hbond_candidate_atom_data(
@@ -46,18 +46,6 @@ def place_water_from_atom_triple(
 
     Returns none if the atoms are collinear, or if the circumradius is greater than hbond_length.
     """
-    # if atom_coords.shape != (3, 3):
-    #     raise ValueError("atom_coords must have shape (3, 3)")
-
-    # circumcenter, circumradius, normal = get_circumcenter(
-    #     atom_coords[0],
-    #     atom_coords[1],
-    #     atom_coords[2],
-    #     epsilon=epsilon,
-    # )
-
-    
-
 
     circumcenter, circumradius, normal = get_circumcenter(
         coords_i,
@@ -71,53 +59,6 @@ def place_water_from_atom_triple(
 
     height = np.sqrt(max(hbond_length**2 - circumradius**2, 0.0))
     return (circumcenter + height * normal, circumcenter - height * normal)
-
-
-def kdtree_find_atom_triples_for_three_hbonds(
-    structure: Structure,
-    hbond_length: float = 2.8,
-    min_pair_dist: float = HBOND_PAIR_MIN_DIST,
-    max_pair_dist: float = HBOND_PAIR_MAX_DIST,
-    epsilon: float = 1e-4,
-) -> np.ndarray:
-    """
-    Find atom triples for three-H-bond water placement using a k-d tree.
-    Returns atom indices into the input structure, with one row per triple.
-    Pairwise distances are all less than max_pair_dist.
-    """
-    candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
-        structure
-    )
-    if len(candidate_atom_indices) < 3:
-        return np.zeros((0, 3), dtype=np.int64)
-
-    kdtree = KDTree(candidate_atom_coords)
-    neighbor_lists = kdtree.query_ball_tree(kdtree, r=max_pair_dist)
-    print(f"Number of neighbor lists: {len(neighbor_lists)}")
-    print(f"Neighbor lists: {neighbor_lists[:10]}")
-    
-    neighbors = []
-    for i, neighbor in enumerate(neighbor_lists):
-        neighbors.append(set(j for j in neighbor if j > i))  # j > i avoids duplicates
-
-    triples = []
-
-    for i in range(len(candidate_atom_coords)):
-        for j in neighbors[i]:
-            # k must be in neighbor list of both i and j
-            common = neighbors[i].intersection(neighbors[j])
-            for k in common:
-                triples.append(
-                    (
-                        candidate_atom_indices[i],
-                        candidate_atom_indices[j],
-                        candidate_atom_indices[k],
-                    )
-                )
-
-    if not triples:
-        return np.zeros((0, 3), dtype=np.int64)
-    return np.array(triples, dtype=np.int64)
 
 
 
@@ -183,58 +124,6 @@ def kdtree_find_water_coords_for_three_hbonds(
     return np.array(placed_water_coords, dtype=candidate_atom_coords.dtype)
 
 
-def find_atom_triples_for_three_hbonds(
-    structure: Structure,
-    hbond_length: float = 2.8,
-    min_pair_dist: float = HBOND_PAIR_MIN_DIST,
-    max_pair_dist: float = HBOND_PAIR_MAX_DIST,
-    epsilon: float = 1e-4,
-) -> np.ndarray:
-    """
-    Find unique atom triples that can support a 3-H-bond water placement.
-
-    Returns atom indices into the input structure, with one row per triple.
-    """
-    candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
-        structure
-    )
-    if len(candidate_atom_indices) < 3:
-        return np.zeros((0, 3), dtype=np.int64)
-
-    pair_distances = squareform(pdist(candidate_atom_coords))
-    adjacency = (pair_distances > min_pair_dist) & (pair_distances < max_pair_dist)
-    np.fill_diagonal(adjacency, False)
-
-    triples = []
-    num_candidates = len(candidate_atom_indices)
-    for i in range(num_candidates - 2):
-        for j in range(i + 1, num_candidates - 1):
-            if not adjacency[i, j]:
-                continue
-            for k in range(j + 1, num_candidates):
-                if not (adjacency[i, k] and adjacency[j, k]):
-                    continue
-                placed_water = place_water_from_atom_triple(
-                    candidate_atom_coords[[i, j, k]],
-                    hbond_length=hbond_length,
-                    epsilon=epsilon,
-                )
-                if placed_water is None:
-                    continue
-                triples.append(
-                    (
-                        candidate_atom_indices[i],
-                        candidate_atom_indices[j],
-                        candidate_atom_indices[k],
-                    )
-                )
-
-    if not triples:
-        return np.zeros((0, 3), dtype=np.int64)
-    return np.array(triples, dtype=np.int64)
-
-
-
 def impute_solvents_from_atom_triples(
     structure: Structure,
     one_solvent_per_chain: bool = True,
@@ -249,50 +138,10 @@ def impute_solvents_from_atom_triples(
     This function assumes the caller has already prepared the input structure
     (for example, by stripping waters beforehand if desired).
     """
-    # atom_triples = find_atom_triples_for_three_hbonds(
-    #     structure,
-    #     hbond_length=hbond_length,
-    #     min_pair_dist=min_pair_dist,
-    #     max_pair_dist=max_pair_dist,
-    #     epsilon=epsilon,
-    # )
+  
     start_total = perf_counter()
     start = perf_counter()
-    # atom_triples = kdtree_find_atom_triples_for_three_hbonds(
-    #     structure,
-    #     hbond_length=hbond_length,
-    #     min_pair_dist=min_pair_dist,
-    #     max_pair_dist=max_pair_dist,
-    #     epsilon=epsilon,
-    # )
-    # kdtree_find_triples_time = perf_counter() - start
-    # print(f"{kdtree_find_triples_time=:.2f}s")
-
-    # if len(atom_triples) == 0:
-    #     return structure
-
-    # place_water_start = perf_counter()
-    # coords = structure.coords.copy()
-    # placed_water_coords = np.zeros(2 * len(atom_triples), dtype=coords.dtype)
-    # num_placed_waters = 0
-    # for atom_triple in atom_triples:
-    #     new_coords = place_water_from_atom_triple(
-    #         structure.coords["coords"][atom_triple],
-    #         hbond_length=hbond_length,
-    #         epsilon=epsilon,
-    #     )
-    #     if new_coords is None:
-    #         continue
-    #     for water_coords in new_coords:
-    #         placed_water_coords[num_placed_waters]["coords"] = water_coords
-    #         num_placed_waters += 1
-        
-    # place_water_time = perf_counter() - place_water_start
-    # print(f"{place_water_time=:.2f}s")
-
-    # if num_placed_waters == 0:
-    #     return structure
-
+  
     placed_water_coords = kdtree_find_water_coords_for_three_hbonds(
         structure,
         hbond_length=hbond_length,
