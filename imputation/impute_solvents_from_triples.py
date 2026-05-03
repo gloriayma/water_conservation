@@ -53,6 +53,7 @@ def get_hbond_candidate_atom_data(
     hbond_candidate_mask &= atoms["is_present"]
     candidate_atom_indices = np.flatnonzero(hbond_candidate_mask)
     candidate_atom_coords = coords[hbond_candidate_mask]
+    print(f"Number of candidate atoms: {len(candidate_atom_indices)}")
     return candidate_atom_indices, candidate_atom_coords
 
 
@@ -103,6 +104,7 @@ def kdtree_find_water_coords_for_three_hbonds(
 
 
     """
+    num_triples = 0
     candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
         structure
     )
@@ -132,6 +134,7 @@ def kdtree_find_water_coords_for_three_hbonds(
             # k must be in neighbor list of both i and j
             common = neighbors[i].intersection(neighbors[j])
             for k in common:
+                num_triples += 1
 
                 water_coords = place_water_from_atom_triple(
                     candidate_atom_coords[i],
@@ -146,6 +149,8 @@ def kdtree_find_water_coords_for_three_hbonds(
     
     place_water_time = perf_counter() - place_water_start
     print(f"{place_water_time=:.2f}s")
+    print(f"Number of triples: {num_triples}")
+    print(f"Number of placed waters: {len(placed_water_coords)}")
 
     return np.array(placed_water_coords, dtype=candidate_atom_coords.dtype)
 
@@ -376,6 +381,7 @@ def filter_solvent_clashes(
 
     surviving_chain_indices = solvent_chain_indices[~clashes_with_nonsolvent]
     surviving_coords = solvent_coords[~clashes_with_nonsolvent]
+    print(f"Number of surviving waters after clash with protein: {len(surviving_chain_indices)}")
     if len(surviving_chain_indices) == 0:
         return rebuild_structure_with_mask(structure, mask)
 
@@ -397,4 +403,5 @@ def filter_solvent_clashes(
             blocked[j] = True
             mask[surviving_chain_indices[j]] = False
 
+    print(f"Number of surviving waters after clash with other waters: {len(surviving_chain_indices)}")
     return rebuild_structure_with_mask(structure, mask)
