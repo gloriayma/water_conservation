@@ -15,7 +15,7 @@ HBOND_PAIR_MIN_DIST = 3.13
 HBOND_PAIR_MAX_DIST = 8# 5.09
 
 
-def _get_hbond_candidate_atom_data(
+def get_hbond_candidate_atom_data(
     structure: Structure,
 ) -> tuple[np.ndarray, np.ndarray]:
     atoms = structure.atoms
@@ -57,8 +57,7 @@ def place_water_from_atom_triple(
         return None
 
     height = np.sqrt(max(hbond_length**2 - circumradius**2, 0.0))
-    return (circumcenter + height * normal, circumcenter - height * normal
-)
+    return (circumcenter + height * normal, circumcenter - height * normal)
 
 
 def kdtree_find_atom_triples_for_three_hbonds(
@@ -70,21 +69,23 @@ def kdtree_find_atom_triples_for_three_hbonds(
 ) -> np.ndarray:
     """
     Find atom triples for three-H-bond water placement using a k-d tree.
-    Returns a list of triples of indeces into the candidate atom coordinates.
+    Returns atom indices into the input structure, with one row per triple.
     Pairwise distances are all less than max_pair_dist.
     """
-    candidate_atom_indices, candidate_atom_coords = _get_hbond_candidate_atom_data(
+    candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
         structure
     )
     if len(candidate_atom_indices) < 3:
         return np.zeros((0, 3), dtype=np.int64)
-    
+
     kdtree = KDTree(candidate_atom_coords)
     neighbor_lists = kdtree.query_ball_tree(kdtree, r=max_pair_dist)
+    print(f"Number of neighbor lists: {len(neighbor_lists)}")
+    print(f"Neighbor lists: {neighbor_lists[:10]}")
     
     neighbors = []
     for i, neighbor in enumerate(neighbor_lists):
-        neighbors.append(set(j for j in neighbor if j > i)) # j > i avoids duplicates
+        neighbors.append(set(j for j in neighbor if j > i))  # j > i avoids duplicates
 
     triples = []
 
@@ -93,9 +94,17 @@ def kdtree_find_atom_triples_for_three_hbonds(
             # k must be in neighbor list of both i and j
             common = neighbors[i].intersection(neighbors[j])
             for k in common:
-                triples.append((i, j, k))
+                triples.append(
+                    (
+                        candidate_atom_indices[i],
+                        candidate_atom_indices[j],
+                        candidate_atom_indices[k],
+                    )
+                )
 
-    return triples
+    if not triples:
+        return np.zeros((0, 3), dtype=np.int64)
+    return np.array(triples, dtype=np.int64)
 
 def find_atom_triples_for_three_hbonds(
     structure: Structure,
@@ -109,7 +118,7 @@ def find_atom_triples_for_three_hbonds(
 
     Returns atom indices into the input structure, with one row per triple.
     """
-    candidate_atom_indices, candidate_atom_coords = _get_hbond_candidate_atom_data(
+    candidate_atom_indices, candidate_atom_coords = get_hbond_candidate_atom_data(
         structure
     )
     if len(candidate_atom_indices) < 3:
@@ -163,19 +172,29 @@ def impute_solvents_from_atom_triples(
     This function assumes the caller has already prepared the input structure
     (for example, by stripping waters beforehand if desired).
     """
-    atom_triples = find_atom_triples_for_three_hbonds(
+    # atom_triples = find_atom_triples_for_three_hbonds(
+    #     structure,
+    #     hbond_length=hbond_length,
+    #     min_pair_dist=min_pair_dist,
+    #     max_pair_dist=max_pair_dist,
+    #     epsilon=epsilon,
+    # )
+
+    atom_triples = kdtree_find_atom_triples_for_three_hbonds(
         structure,
         hbond_length=hbond_length,
         min_pair_dist=min_pair_dist,
         max_pair_dist=max_pair_dist,
         epsilon=epsilon,
     )
+
     if len(atom_triples) == 0:
         return structure
 
     coords = structure.coords.copy()
-    placed_water_coords = np.zeros(len(atom_triples), dtype=coords.dtype)
-    for triple_idx, atom_triple in enumerate(atom_triples):
+    placed_water_coords = np.zeros(2 * len(atom_triples), dtype=coords.dtype)
+    num_placed_waters = 0
+    for atom_triple in atom_triples:
         new_coords = place_water_from_atom_triple(
             structure.coords["coords"][atom_triple],
             hbond_length=hbond_length,
@@ -183,11 +202,16 @@ def impute_solvents_from_atom_triples(
         )
         if new_coords is None:
             continue
-        placed_water_coords[triple_idx]["coords"] = new_coords
+        for water_coords in new_coords:
+            placed_water_coords[num_placed_waters]["coords"] = water_coords
+            num_placed_waters += 1
+
+    if num_placed_waters == 0:
+        return structure
 
     return _append_imputed_solvents(
         structure,
-        placed_water_coords,
+        placed_water_coords[:num_placed_waters],
         one_solvent_per_chain=one_solvent_per_chain,
     )
 
@@ -234,6 +258,7 @@ def _append_imputed_solvents(
     num_to_impute = len(imputed_solvent_coords)
     imputed_solvent_atoms = np.zeros(num_to_impute, dtype=atoms.dtype)
     imputed_solvent_residues = np.zeros(num_to_impute, dtype=residues.dtype)
+    imputed_solvent_chains = None
 
     if not one_solvent_per_chain:
         atom_idx = chains[-1]["atom_idx"] + chains[-1]["atom_num"]
@@ -256,31 +281,28 @@ def _append_imputed_solvents(
             dtype=Chain,
         )
         chains = np.append(chains, imaginary_solvent_chain)
+    else:
+        base_atom_idx = chains[-1]["atom_idx"] + chains[-1]["atom_num"]
+        base_chain_idx = len(chains)
+        base_res_idx = len(residues)
+        imputed_solvent_chains = np.zeros(num_to_impute, dtype=Chain)
 
     for impute_idx, new_coords in enumerate(imputed_solvent_coords["coords"]):
         imputed_solvent_atoms[impute_idx] = ("O", new_coords, True, 50.0, 1.0)
         if one_solvent_per_chain:
-            atom_idx = chains[-1]["atom_idx"] + chains[-1]["atom_num"]
-            res_idx = len(residues) + impute_idx
-            imaginary_solvent_chain = np.array(
-                [
-                    (
-                        f"Wa{num_solvents + impute_idx}",
-                        const.chain_type_ids["iSOLVENT"],
-                        solvent_entity_id,
-                        next_sym_id + impute_idx,
-                        len(chains),
-                        atom_idx,
-                        1,
-                        res_idx,
-                        1,
-                        0,
-                    )
-                ],
-                dtype=Chain,
+            solvent_atom_idx = base_atom_idx + impute_idx
+            imputed_solvent_chains[impute_idx] = (
+                f"Wa{num_solvents + impute_idx}",
+                const.chain_type_ids["iSOLVENT"],
+                solvent_entity_id,
+                next_sym_id + impute_idx,
+                base_chain_idx + impute_idx,
+                solvent_atom_idx,
+                1,
+                base_res_idx + impute_idx,
+                1,
+                0,
             )
-            chains = np.append(chains, imaginary_solvent_chain)
-            solvent_atom_idx = atom_idx
         else:
             solvent_atom_idx = imaginary_solvent_chain[0]["atom_idx"] + impute_idx
 
@@ -300,6 +322,7 @@ def _append_imputed_solvents(
     atoms = np.append(atoms, imputed_solvent_atoms)
     residues = np.append(residues, imputed_solvent_residues)
     if one_solvent_per_chain:
+        chains = np.append(chains, imputed_solvent_chains)
         mask = np.append(mask, np.full(num_to_impute, True))
     else:
         mask = np.append(mask, True)
