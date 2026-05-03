@@ -1,4 +1,5 @@
 from __future__ import annotations
+from time import perf_counter
 
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
@@ -179,7 +180,8 @@ def impute_solvents_from_atom_triples(
     #     max_pair_dist=max_pair_dist,
     #     epsilon=epsilon,
     # )
-
+    start_total = perf_counter()
+    start = perf_counter()
     atom_triples = kdtree_find_atom_triples_for_three_hbonds(
         structure,
         hbond_length=hbond_length,
@@ -187,10 +189,13 @@ def impute_solvents_from_atom_triples(
         max_pair_dist=max_pair_dist,
         epsilon=epsilon,
     )
+    kdtree_find_triples_time = perf_counter() - start
+    print(f"{kdtree_find_triples_time=:.2f}s")
 
     if len(atom_triples) == 0:
         return structure
 
+    place_water_start = perf_counter()
     coords = structure.coords.copy()
     placed_water_coords = np.zeros(2 * len(atom_triples), dtype=coords.dtype)
     num_placed_waters = 0
@@ -205,6 +210,9 @@ def impute_solvents_from_atom_triples(
         for water_coords in new_coords:
             placed_water_coords[num_placed_waters]["coords"] = water_coords
             num_placed_waters += 1
+        
+    place_water_time = perf_counter() - place_water_start
+    print(f"{place_water_time=:.2f}s")
 
     if num_placed_waters == 0:
         return structure
@@ -221,6 +229,7 @@ def _append_imputed_solvents(
     imputed_solvent_coords: np.ndarray,
     one_solvent_per_chain: bool = False,
 ) -> Structure:
+    append_imputed_solvents_start = perf_counter()
     if len(imputed_solvent_coords) == 0:
         return structure
 
@@ -327,6 +336,9 @@ def _append_imputed_solvents(
         mask = np.append(mask, np.full(num_to_impute, True))
     else:
         mask = np.append(mask, True)
+    append_imputed_solvents_time = perf_counter() - append_imputed_solvents_start
+
+    print(f"{append_imputed_solvents_time=:.2f}s")
 
     return Structure(
         atoms=atoms,
