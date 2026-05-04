@@ -26,6 +26,14 @@ def stripped_gt_structure(PDB_ID):
     assert stripped_gt.count_solvents() == 0
     return stripped_gt
 
+
+def count_residues(structure: Structure) -> int:
+    return len(structure.residues)
+
+
+def count_stripped_gt_residues(PDB_ID) -> int:
+    return count_residues(stripped_gt_structure(PDB_ID))
+
 def filtered_gt_structure(PDB_ID, min_hbonds):
     gt_structure = raw_gt_structure(PDB_ID)
     gt_structure = gt_structure.to_one_solvent_per_chain(gt_structure)
