@@ -12,7 +12,7 @@ from gloria_hbond_helpers import *
 # from new_impute_solvent import get_circumcenter
 
 
-HBOND_CANDIDATE_PREFIXES = ("N", "O", "F", "S")
+HBOND_CANDIDATE_PREFIXES = ("N", "O", "F")
 HBOND_PAIR_MIN_DIST = 0 #3.13
 HBOND_PAIR_MAX_DIST = 5.6 #8# 5.09
 

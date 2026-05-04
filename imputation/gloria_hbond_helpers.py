@@ -50,6 +50,7 @@ def gloria_get_solvent_hbond_counts_and_mask(
     if len(solvent_coords) == 0:
         return num_hbonds, solvent_chain_mask
 
+
     hbond_candidate_mask = (
         (
             np.char.startswith(structure.atoms["name"], ("N"))
