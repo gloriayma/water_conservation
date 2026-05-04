@@ -1,0 +1,12 @@
+{
+  "total_clusters_in_file": 1049376,
+  "total_member_tokens": 1597265,
+  "clusters_with_any_qualifying": 71378,
+  "clusters_after_size_filter": 5230,
+  "dropped_not_in_manifest": 1142259,
+  "dropped_not_xray": 200377,
+  "dropped_bad_resolution": 72940,
+  "dropped_no_waters": 1135,
+  "resolution_cutoff": 2.5,
+  "min_cluster_size": 5
+}
