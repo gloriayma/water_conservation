@@ -104,6 +104,9 @@ def place_water_from_atom_triple(
         return circumcenter[None, :]
 
     height = np.sqrt(max(hbond_length**2 - circumradius**2, 0.0))
+
+    # pick only one solution
+    # return (circumcenter + height * normal)[None, :]
     return np.stack(
         (circumcenter + height * normal, circumcenter - height * normal),
         axis=0,
