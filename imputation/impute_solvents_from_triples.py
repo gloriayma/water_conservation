@@ -144,8 +144,8 @@ def kdtree_find_water_coords_for_three_hbonds(
     kdtree = KDTree(candidate_atom_coords)
     max_pair_dist = 2*max_hbond_length
     neighbor_lists = kdtree.query_ball_tree(kdtree, r=max_pair_dist)
-    print(f"Number of neighbor lists: {len(neighbor_lists)}")
-    print(f"Neighbor lists: {neighbor_lists[:10]}")
+    # print(f"Number of neighbor lists: {len(neighbor_lists)}")
+    # print(f"Neighbor lists: {neighbor_lists[:10]}")
     
     neighbors = []
     for i, neighbor in enumerate(neighbor_lists):

@@ -16,7 +16,7 @@ def resolve_npz_path(pdb_id: str, npz_root: Path, npz_path: str | None = None) -
 def raw_gt_structure(PDB_ID):
     npz_path = resolve_npz_path(PDB_ID, NPZ_ROOT, NPZ_PATH)
     gt_structure = Structure.load(npz_path)
-    print(f"Raw GT structure number of solvents: {gt_structure.count_solvents()}")
+    # print(f"Raw GT structure number of solvents: {gt_structure.count_solvents()}")
     return gt_structure
 
 def stripped_gt_structure(PDB_ID):

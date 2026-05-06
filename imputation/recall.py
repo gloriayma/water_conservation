@@ -142,7 +142,7 @@ def compare_structure_waters(
 
 
 
-def recall_result(PDB_ID, recall_threshold, protein_clash_rad, solvent_clash_rad, max_hbond_length):
+def recall_result(PDB_ID, recall_thresholds, protein_clash_rad, solvent_clash_rad, max_hbond_length):
     npz_path = resolve_npz_path(PDB_ID, NPZ_ROOT)
     gt_structure = Structure.load(npz_path)
     gt_structure = gt_structure.to_one_solvent_per_chain(gt_structure)
@@ -163,9 +163,21 @@ def recall_result(PDB_ID, recall_threshold, protein_clash_rad, solvent_clash_rad
         solvent_clash_rad=solvent_clash_rad,
     )
 
-    result = compare_structure_waters(
-        gt_3hbonds_structure,
-        no_collisions,
-        cutoff=recall_threshold,
-    )
-    return result
+    results = []
+    if isinstance(recall_thresholds, list):
+        for recall_threshold in recall_thresholds:
+            result = compare_structure_waters(
+                gt_3hbonds_structure,
+                no_collisions,
+                cutoff=recall_threshold,
+            )
+            results.append(result)
+    else:
+        result = compare_structure_waters(
+            gt_3hbonds_structure,
+            no_collisions,
+            cutoff=recall_thresholds,
+        )
+        results.append(result)
+        
+    return results
