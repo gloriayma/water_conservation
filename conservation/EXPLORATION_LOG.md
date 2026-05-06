@@ -155,3 +155,128 @@ Clusters with >=5 qualifying PDBs:  5,230
   all real crystal atoms)
 - Did not check whether waters with `is_present=False` exist (could indicate density-absent
   atoms in multi-model ensembles)
+
+---
+
+## Session 2 — 2026-05-05
+
+### Motivation: local cropping for alignment
+
+Global CA superposition (session 1, notebook 03) aligns the entire chain as one rigid body.
+For large proteins this is misleading: even with a low global RMSD, residues far from the
+alignment core can have substantial positional error due to accumulated rotation/translation
+uncertainty. The solution is to define canonical **local crops** on a reference structure and
+align each crop independently across cluster members.
+
+### Key discovery: `residues["atom_center"]`
+
+The `residues` structured array has two fields not captured in the session 1 schema summary:
+- `atom_center` (int32): global index into `atoms` for the canonical representative atom of
+  this residue. For amino acids this is CA, for waters it is the O atom. For ligands it
+  appears to be the first heavy atom.
+- `atom_disto` (int32): index into `atoms` for the "distal" atom (CB for amino acids). Not
+  used in this work yet.
+
+Using `atoms[res["atom_center"]]["coords"]` is therefore the correct way to get a residue
+center — no centroid computation needed. This is consistent with how Boltz/BoltzGen uses
+these fields internally for distance-matrix features.
+
+Both `is_present` fields need to be checked: `residue["is_present"]` guards the residue
+itself, and `atoms[res["atom_center"]]["is_present"]` guards the center atom.
+
+### Greedy sphere-covering algorithm
+
+Implemented in `scripts/crop.py`. Key design choices:
+
+- **Candidate points**: all residue canonical centers (polymer CA + water O + ligand center)
+  that are marked present.
+- **Covering radius**: 20 Å (configurable). Large enough that a typical 150-residue protein
+  gets 2–6 crops; a 1,000-residue protein gets ~20–30.
+- **Seed ordering**: array order (no optimization for minimum number of crops). This is
+  deterministic and reproducible, which matters for crop identity across cluster members.
+- **Coverage marking**: once a residue is covered (added to any crop), it cannot become
+  a seed. Crops may overlap — a residue within 20 Å of two seeds appears in both crops.
+  This is intentional (overlap at boundaries provides context for local alignment).
+- **Water-only warning**: any crop with no polymer/ligand residues prints a warning. This
+  flags isolated water clusters far from the protein core (e.g., disordered solvent patches
+  or crystal-contact waters not near any protein atom). In practice seen rarely.
+
+### Demo results (6crk — first 5-member cluster at 2.0 Å, 1030-residue representative)
+
+- Structure: 982 non-water residues, 627 waters, 28 crops at radius=20 Å
+- Crop sizes range from 53 to 298 total residues; median ~150
+- No water-only or isolated warnings (all isolated waters are within 20 Å of at least one
+  polymer atom in this structure)
+- Sums across crops: 2,665 non-water (2.7× the 982 in the structure), 1,642 waters (2.6×)
+  — confirms overlapping crops
+
+### mmCIF export
+
+Used `Structure.extract_residues(struct, indices)` + `to_mmcif(cropped)` from BoltzGen.
+`extract_residues` is a method on the `Structure` class (called as
+`Structure.extract_residues(struct, indices)`, not as a standalone function). It handles
+all reindexing of `atom_idx`, `res_idx`, chain atom/residue ranges correctly.
+
+### Scripts/notebooks written
+
+- `scripts/crop.py` — `count_nonsolvent_residues`, `get_residue_centers`, `greedy_crop`,
+  `save_crop_as_mmcif`
+- `notebooks/04_crop_investigation.ipynb` — demo on cluster `['5kdo','6crk','6rmv','8qeg','8qeh']`
+
+### What was NOT tried
+
+- Did not try varying the radius (20 Å is untested; should validate that the local
+  alignment within each crop is actually better than global).
+- Did not implement the local alignment step (using the crop definitions). That is the
+  next step.
+- Did not check whether crop identity is stable across cluster members (i.e., whether
+  the same seed ordering produces spatially consistent crops in structurally similar
+  proteins). This needs validation before water pooling can use crops.
+
+---
+
+## Session 3 — 2026-05-05
+
+### Changes to greedy_crop: water residues excluded as seeds
+
+Changed `greedy_crop` so that only non-water (polymer + ligand) residues can serve as
+seeds. Water residues can still be captured by a nearby non-water seed sphere, but they
+will never anchor a crop on their own. This removes the previous "water-only crop"
+warning entirely (all crops now guaranteed to have at least one non-solvent residue).
+Crop count for 6crk dropped from 28 to 26 as a result.
+
+### crop_sample: matching non-solvent residues across cluster members
+
+New function `crop_sample(ref_struct, ref_crop, sample_struct, water_radius)`.
+
+**Non-solvent matching**: by `(entity_id, sym_id, local 0-based position in chain)`.
+For same-sequence 100%-identity clusters this is exact. Residues absent in the
+sample (missing density, shorter chain) are returned as `None` in `sample_ns_indices`.
+The ref/sample index lists are parallel — `ref_ns_indices[i]` corresponds to
+`sample_ns_indices[i]` — which is the correspondence needed for Kabsch alignment.
+
+**Water inclusion**: all present waters in the sample within `water_radius` of the
+sample's seed center atom (the CA of the residue corresponding to the reference seed).
+Falls back to the mean of all matched non-solvent centers if the seed residue is absent.
+
+**TODO to explore**: alternative water inclusion — all waters within a smaller radius
+(e.g. 4-5 A) of ANY polymer/ligand atom in the crop. Would give denser local
+hydration shells and might be more biologically meaningful.
+
+### Demo results on cluster ['5kdo','6crk','6rmv','8qeg','8qeh']
+
+Reference: 6crk (most non-solvent residues). 26 crops x 5 samples = 130 total;
+118 saved, 12 skipped (0 residues after matching).
+
+Key observations from the stats table:
+- Crops 0-19: most samples have good coverage (matched >= 80% of ref non-solvent res)
+- Crops 20-25: unique to 6crk or nearly so. Crops 21, 22, 24 have 0 matched residues
+  in 4/5 samples — likely regions of 6crk absent from the shorter structures.
+  6rmv (429 non-solvent res) consistently has fewer matches, as expected.
+- Fallbacks: 4-6 crops per sample use the mean-center fallback for water inclusion,
+  meaning the reference seed residue is absent in those samples.
+
+### Scripts/notebooks written
+
+- `scripts/crop.py` updated: `_build_res_chain_map`, `crop_sample`, revised `greedy_crop`
+- `notebooks/05_cluster_crops.ipynb`: full cluster-level crop demo and mmCIF export
