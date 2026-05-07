@@ -280,3 +280,48 @@ Key observations from the stats table:
 
 - `scripts/crop.py` updated: `_build_res_chain_map`, `crop_sample`, revised `greedy_crop`
 - `notebooks/05_cluster_crops.ipynb`: full cluster-level crop demo and mmCIF export
+
+---
+
+## Session: Distogram distribution analysis (imputation/)
+
+### Goal
+
+Compare the spatial environment of real (≥3 H-bond) vs geometrically imputed waters
+using residue-center coordinates from the Structure's `atom_center` field (Cα for protein,
+O for HOH / imputed waters).
+
+### Key finding: `atom_center` field
+
+`structure.residues['atom_center']` stores an **absolute atom index** (not an offset):
+- Protein residue → Cα
+- HOH / iSOLVENT residue → the single O atom
+This is set correctly for imputed waters in `impute_solvents_from_atom_triples`.
+
+### Files created
+
+- `imputation/distogram_distribution_slicing/distogram_helpers.py` — atomic helpers:
+  - `get_residue_coords(structure, mol_types)` — returns (n,3) representative coords
+  - `knn_distances(query, ref, ks)` — shape (n_query, len(ks))
+  - `radius_neighbor_counts(query, ref, radii)` — shape (n_query, len(radii))
+  - `centroid_distances(query, ref)`, `self_nearest_neighbor_distances(coords)`
+  - `load_gt_and_imputed(pdb_id, ...)` → (gt_real, imputed_filtered, gt_stripped)
+  - `analyze_pdb`, `collect_results`, `concat_field`
+  - Plotting: `plot_knn_violins`, `plot_radius_count_ecdfs`, `plot_ecdf_comparison`
+  - `set_paper_style()` — ICML-appropriate rcParams (9pt serif, no top/right spines, 300 dpi)
+
+- `imputation/distogram_distribution_slicing/distogram_analysis.ipynb`
+  - Part 0: setup + drop-in PDB_LIST_FILE variable
+  - Part 1: representative atom walkthrough (shows atom_center → Cα / O)
+  - Part 2: single-PDB step-by-step
+  - Parts 3–7: multi-PDB analysis + all four plots
+
+### Pilot results on 8IF7
+
+- n_real=23 (≥3 H-bond GT waters), n_imputed=2221
+- Median nearest-1 residue: real=3.63 Å, imputed=2.49 Å
+  → imputed waters placed closer to H-bond donors/acceptors by construction
+- Median centroid distance: real=9.81 Å, imputed=17.50 Å
+  → imputed waters are more surface-exposed; real waters can be buried
+- Median water-water NN distance: real=4.50 Å, imputed=1.56 Å
+  → many imputed waters cluster very tightly (geometric degeneracy of triples)
