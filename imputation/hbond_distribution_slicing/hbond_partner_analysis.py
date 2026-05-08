@@ -315,8 +315,8 @@ def filter_to_min_hbonds(structure: Structure, min_hbonds: int) -> Structure:
 def build_imputed_structure(
     gt_structure: Structure,
     max_hbond_length: float,
-    protein_clash_rad: float,
     solvent_clash_rad: float,
+    atom_clash_dists: dict | None = None,
 ) -> Structure:
     """
     Strip waters from gt_structure, impute new ones geometrically, then filter clashes.
@@ -327,8 +327,8 @@ def build_imputed_structure(
     imputed = impute_solvents_from_atom_triples(stripped, max_hbond_length=max_hbond_length)
     return filter_solvent_clashes(
         imputed,
-        protein_clash_rad=protein_clash_rad,
         solvent_clash_rad=solvent_clash_rad,
+        atom_clash_dists=atom_clash_dists,
     )
 
 
@@ -372,8 +372,8 @@ def analyze_one_pdb(
     pdb_id: str,
     min_hbonds: int = 3,
     max_hbond_length: float = 3.5,
-    protein_clash_rad: float = 2.0,
     solvent_clash_rad: float = 2.0,
+    atom_clash_dists: dict | None = None,
     npz_root: Path = NPZ_ROOT,
     verbose: bool = False,
 ) -> dict:
@@ -398,7 +398,7 @@ def analyze_one_pdb(
     real_descriptors = get_water_partner_descriptors(real_coords, real_candidate_info)
 
     # --- imputed waters ---
-    imputed = build_imputed_structure(gt, max_hbond_length, protein_clash_rad, solvent_clash_rad)
+    imputed = build_imputed_structure(gt, max_hbond_length, solvent_clash_rad, atom_clash_dists)
     imputed_coords = extract_solvent_coords(imputed, mol_types=(const.chain_type_ids["iSOLVENT"],))
 
     # Build candidate info from the stripped structure (non-water atoms only),
@@ -422,8 +422,8 @@ def collect_analysis_results(
     pdb_ids: list[str],
     min_hbonds: int = 3,
     max_hbond_length: float = 3.5,
-    protein_clash_rad: float = 2.0,
     solvent_clash_rad: float = 2.0,
+    atom_clash_dists: dict | None = None,
     npz_root: Path = NPZ_ROOT,
     verbose: bool = True,
 ) -> list[dict]:
@@ -440,8 +440,8 @@ def collect_analysis_results(
                 pdb_id,
                 min_hbonds=min_hbonds,
                 max_hbond_length=max_hbond_length,
-                protein_clash_rad=protein_clash_rad,
                 solvent_clash_rad=solvent_clash_rad,
+                atom_clash_dists=atom_clash_dists,
                 npz_root=npz_root,
                 verbose=verbose,
             )
@@ -476,15 +476,14 @@ def collect_all_descriptors(
     pdb_ids: list[str],
     min_hbonds: int = 3,
     max_hbond_length: float = 3.5,
-    protein_clash_rad: float = 2.0,
     solvent_clash_rad: float = 2.0,
+    atom_clash_dists: dict | None = None,
     npz_root: Path = NPZ_ROOT,
     verbose: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """Convenience wrapper: run collect_analysis_results and return flat descriptor lists."""
     results = collect_analysis_results(
-        pdb_ids, min_hbonds, max_hbond_length, protein_clash_rad, solvent_clash_rad,
-        npz_root, verbose,
+        pdb_ids, min_hbonds, max_hbond_length, solvent_clash_rad, atom_clash_dists, npz_root, verbose,
     )
     return get_flat_descriptors(results)
 

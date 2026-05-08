@@ -163,9 +163,9 @@ def load_gt_and_imputed(
     pdb_id: str,
     npz_root: Path = NPZ_ROOT,
     max_hbond_length: float = 3.5,
-    protein_clash_rad: float = 2.2,
     solvent_clash_rad: float = 3.0,
     min_hbonds_gt: int = 3,
+    atom_clash_dists: dict | None = None,
 ) -> tuple[Structure, Structure, Structure]:
     """
     Load and prepare three structures for a PDB ID:
@@ -185,8 +185,8 @@ def load_gt_and_imputed(
     imputed = impute_solvents_from_atom_triples(gt_stripped, max_hbond_length=max_hbond_length)
     imputed_filtered = filter_solvent_clashes(
         imputed,
-        protein_clash_rad=protein_clash_rad,
         solvent_clash_rad=solvent_clash_rad,
+        atom_clash_dists=atom_clash_dists,
     )
     return gt_real, imputed_filtered, gt_stripped
 
@@ -197,9 +197,9 @@ def analyze_pdb(
     radius_list: Sequence[float],
     npz_root: Path = NPZ_ROOT,
     max_hbond_length: float = 3.5,
-    protein_clash_rad: float = 2.2,
     solvent_clash_rad: float = 3.0,
     min_hbonds_gt: int = 3,
+    atom_clash_dists: dict | None = None,
 ) -> dict:
     """
     Run all distance analyses for one PDB ID against its polymer residue centers.
@@ -213,7 +213,8 @@ def analyze_pdb(
     """
     gt_real, imputed, gt_stripped = load_gt_and_imputed(
         pdb_id, npz_root, max_hbond_length,
-        protein_clash_rad, solvent_clash_rad, min_hbonds_gt,
+        solvent_clash_rad, min_hbonds_gt,
+        atom_clash_dists=atom_clash_dists,
     )
     ref_coords = get_residue_coords(gt_stripped, mol_types=POLYMER_MOL_TYPES)
     real_coords = get_residue_coords(gt_real, mol_types=SOLVENT_MOL_TYPES)
@@ -264,6 +265,9 @@ def concat_field(results: list[dict], field: str) -> np.ndarray:
 
 
 # ─── Tier 5: Plotting — ICML paper style ─────────────────────────────────────────
+def print_hello():
+    print("hello")
+
 
 def set_paper_style() -> None:
     """

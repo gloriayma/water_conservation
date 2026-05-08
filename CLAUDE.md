@@ -96,7 +96,8 @@ Do not scale up until the thrombin numbers look right.
   the others suffice.
 - Numpy + scikit-learn for the clustering math. Don't reach for pandas
   unless the data really is tabular.
-- Code in `scripts/`, I want validation / proof of things to be in ipynbs - make the organization very clear with markdown cells for section headers and descriptions. Have the ipynbs call the helper functions in scripts, and make the scripts functions very readable, atomic, and reusable and meaningful. I need to be able to run the cells and reproduce your work and inspect your code by looking in the helper function files. 
+- Code in `scripts/`, I want validation / proof of things to be in ipynbs - make the organization very clear with markdown cells for section headers and descriptions. Have the ipynbs call the helper functions in scripts, and make the scripts functions very readable, atomic, and reusable and meaningful. I need to be able to run the cells and reproduce your work and inspect your code by looking in the helper function files.
+- Every notebook must include `%load_ext autoreload` and `%autoreload 2` in the first code cell (before any imports).
 
 Please also create a new md file to document, extensively, what you've explored and tried - including things that did not work, as well as the reason they didn't work- and small scripts you run, and statistics you've found. Also create a separate md file to just record results. 
 - Git commits at meaningful checkpoints, not after every edit. Always commit

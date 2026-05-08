@@ -16,6 +16,17 @@ HBOND_CANDIDATE_PREFIXES = ("N", "O", "F")
 HBOND_PAIR_MIN_DIST = 0 #3.13
 HBOND_PAIR_MAX_DIST = 5.6 #8# 5.09
 
+# Default minimum water-O distance applied to every non-solvent atom.
+# Override per-element at call time via atom_clash_dists.
+DEFAULT_MIN_WATER_DIST: float = 2.4
+
+
+def _element_from_atom_name(name: str) -> str:
+    s = name.strip().upper()
+    if s[:2] in ("CL", "BR", "SE"):
+        return s[:2]
+    return s[0] if s else "C"
+
 
 def get_atom_to_residue_index(structure: Structure) -> np.ndarray:
     atom_to_residue = np.full(len(structure.atoms), -1, dtype=np.int64)
@@ -49,6 +60,80 @@ def get_circumcenter(a, b, c, epsilon=1e-4):
     circumradius = np.linalg.norm(numerator / denominator)
     normal = uxv / np.linalg.norm(uxv)
     return circumcenter, circumradius, normal
+
+
+def _get_circumcenter_batch(
+    a: np.ndarray,
+    b: np.ndarray,
+    c: np.ndarray,
+    epsilon: float = 1e-4,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Vectorised circumcenter for N triples simultaneously.
+
+    a, b, c : (N, 3) float arrays of atom coordinates.
+    Returns (circumcenter, circumradius, normal, collinear_mask), all (N, …).
+    collinear_mask is True for triples where the atoms are collinear.
+    """
+    u = b - a                                          # (N, 3)
+    v = c - a
+    uxv = np.cross(u, v)                               # (N, 3)
+    uxv_norm = np.linalg.norm(uxv, axis=1)             # (N,)
+
+    collinear = uxv_norm < epsilon
+    safe_norm = np.where(collinear, 1.0, uxv_norm)     # avoid div-by-zero
+
+    u_norm2 = (u * u).sum(axis=1, keepdims=True)       # (N, 1)
+    v_norm2 = (v * v).sum(axis=1, keepdims=True)
+    vec = u_norm2 * v - v_norm2 * u                    # (N, 3)
+    numerator = np.cross(vec, uxv)                     # (N, 3)
+    denominator = 2.0 * safe_norm ** 2                 # (N,)
+
+    offset = numerator / denominator[:, None]          # (N, 3)
+    circumcenter = a + offset
+    circumradius = np.linalg.norm(offset, axis=1)
+    normal = uxv / safe_norm[:, None]
+
+    circumcenter[collinear] = np.nan
+    circumradius[collinear] = np.nan
+    return circumcenter, circumradius, normal, collinear
+
+
+def _place_waters_batch(
+    a: np.ndarray,
+    b: np.ndarray,
+    c: np.ndarray,
+    max_hbond_length: float,
+    hbond_length: float,
+    epsilon: float = 1e-4,
+) -> np.ndarray:
+    """
+    Compute water positions for N triples in one vectorised pass.
+
+    Returns an (M, 3) array of water oxygen coordinates, M ≤ 2N.
+    """
+    circumcenter, circumradius, normal, collinear = _get_circumcenter_batch(
+        a, b, c, epsilon
+    )
+    valid = ~collinear & (circumradius <= max_hbond_length)
+
+    case1 = valid & (circumradius > hbond_length)   # place at circumcenter
+    case2 = valid & (circumradius <= hbond_length)  # two solutions above/below plane
+
+    parts = []
+    if case1.any():
+        parts.append(circumcenter[case1])
+
+    if case2.any():
+        h = np.sqrt(
+            np.maximum(hbond_length ** 2 - circumradius[case2] ** 2, 0.0)
+        )[:, None]
+        parts.append(circumcenter[case2] + h * normal[case2])
+        parts.append(circumcenter[case2] - h * normal[case2])
+
+    if not parts:
+        return np.zeros((0, 3), dtype=a.dtype)
+    return np.concatenate(parts, axis=0)
 
 
 def get_hbond_candidate_atom_data(
@@ -153,42 +238,46 @@ def kdtree_find_water_coords_for_three_hbonds(
 
     neighbor_list_time = perf_counter() - kdtree_find_start
     print(f"{neighbor_list_time=:.2f}s")
-    place_water_start = perf_counter()
 
-    placed_water_coords = [] # speed up by allocating array ahead of time? 
-
+    # --- Enumerate all valid (i, j, k) triples ---
+    enum_start = perf_counter()
+    idx_i, idx_j, idx_k = [], [], []
     for i in range(len(candidate_atom_coords)):
         for j in neighbors[i]:
-            # k must be in neighbor list of both i and j
             common = neighbors[i].intersection(neighbors[j])
             for k in common:
                 num_triples += 1
-                if len(
-                    {
-                        candidate_residue_indices[i],
-                        candidate_residue_indices[j],
-                        candidate_residue_indices[k],
-                    }
-                ) < 3:
+                if len({
+                    candidate_residue_indices[i],
+                    candidate_residue_indices[j],
+                    candidate_residue_indices[k],
+                }) < 3:
                     continue
+                idx_i.append(i)
+                idx_j.append(j)
+                idx_k.append(k)
 
-                water_coords = place_water_from_atom_triple(
-                    candidate_atom_coords[i],
-                    candidate_atom_coords[j],
-                    candidate_atom_coords[k],
-                    max_hbond_length=max_hbond_length,
-                    hbond_length=hbond_length,
-                    epsilon=epsilon,
-                )
-                if water_coords is not None:
-                    placed_water_coords.extend(water_coords)
-    
-    place_water_time = perf_counter() - place_water_start
-    print(f"{place_water_time=:.2f}s")
-    print(f"Number of triples: {num_triples}")
-    print(f"Number of placed waters: {len(placed_water_coords)}")
+    print(f"enum_time={perf_counter()-enum_start:.2f}s  n_triples={num_triples}  n_valid={len(idx_i)}")
 
-    return np.array(placed_water_coords, dtype=candidate_atom_coords.dtype)
+    if not idx_i:
+        return np.zeros((0, 3), dtype=candidate_atom_coords.dtype)
+
+    # --- Batch geometry: one vectorised numpy call for all triples ---
+    geom_start = perf_counter()
+    ti = np.array(idx_i, dtype=np.intp)
+    tj = np.array(idx_j, dtype=np.intp)
+    tk = np.array(idx_k, dtype=np.intp)
+    placed_water_coords = _place_waters_batch(
+        candidate_atom_coords[ti],
+        candidate_atom_coords[tj],
+        candidate_atom_coords[tk],
+        max_hbond_length=max_hbond_length,
+        hbond_length=hbond_length,
+        epsilon=epsilon,
+    )
+    print(f"geom_time={perf_counter()-geom_start:.2f}s  n_placed={len(placed_water_coords)}")
+
+    return placed_water_coords
 
 
 def impute_solvents_from_atom_triples(
@@ -358,17 +447,23 @@ def _append_imputed_solvents(
 
 def filter_solvent_clashes(
     structure: Structure,
-    protein_clash_rad: float,
     solvent_clash_rad: float,
+    atom_clash_dists: dict[str, float] | None = None,
 ) -> Structure:
     """
-    Remove solvent molecules whose oxygen clashes with a molecule within protein_clash_rad, 
-    or wiht another solvent molecule within solvent_clash_rad.
+    Remove solvent molecules that clash with the protein or with each other.
 
-    This is a two-stage post-processing filter:
-    1. Drop solvent molecules whose oxygen clashes with any non-solvent atom.
-    2. Among the remaining solvents, greedily keep a non-clashing subset in
-       chain order.
+    Stage 1 — Per-element vdW protein clash.
+    Every non-solvent atom gets DEFAULT_MIN_WATER_DIST (2.4 Å) by default.
+    atom_clash_dists overrides specific elements, e.g. {"C": 3.0} raises the
+    carbon threshold while leaving everything else at 2.4 Å. Pass {"N": 0.0}
+    to exempt an element entirely.
+
+    Single-pass: one KDTree on all active protein atoms, queried at the maximum
+    threshold, with per-atom comparison vectorised over the sparse result.
+
+    Stage 2 — Solvent-solvent clash: greedily keep a non-clashing subset
+    within solvent_clash_rad of each other (chain order).
     """
     structure = structure.to_one_solvent_per_chain(structure)
     mask = structure.mask.copy()
@@ -405,31 +500,48 @@ def filter_solvent_clashes(
     solvent_coords = atom_coords[solvent_atom_indices]
     nonsolvent_atom_mask = (~solvent_atom_mask) & atom_present
     nonsolvent_coords = atom_coords[nonsolvent_atom_mask]
-    # clash_radius = np.nextafter(min_dist, 0.0)
-    protein_clash_radius = np.nextafter(protein_clash_rad, 0.0)
-    solvent_clash_radius = np.nextafter(solvent_clash_rad, 0.0)
+    nonsolvent_names = structure.atoms["name"][nonsolvent_atom_mask]
 
-    if len(nonsolvent_coords) > 0:
-        fixed_atom_kdtree = KDTree(nonsolvent_coords)
-        fixed_atom_hits = fixed_atom_kdtree.query_ball_point(solvent_coords, r=protein_clash_radius)
-        clashes_with_nonsolvent = np.array(
-            [len(hit_indices) > 0 for hit_indices in fixed_atom_hits],
-            dtype=bool,
+    # Stage 1: protein clash (single-pass, vectorised).
+    # Every atom gets DEFAULT_MIN_WATER_DIST unless atom_clash_dists overrides its element.
+    overrides = atom_clash_dists or {}
+    unique_names = set(nonsolvent_names.tolist())
+    name_thresh = {
+        n: overrides.get(_element_from_atom_name(n), DEFAULT_MIN_WATER_DIST)
+        for n in unique_names
+    }
+    per_atom_min_dists = np.array(
+        [name_thresh[n] for n in nonsolvent_names], dtype=np.float32
+    )
+
+    clashes_protein = np.zeros(len(solvent_chain_indices), dtype=bool)
+    active_mask = per_atom_min_dists > 0.0
+    if active_mask.any() and len(solvent_coords) > 0:
+        active_coords = nonsolvent_coords[active_mask]
+        active_thresholds = per_atom_min_dists[active_mask]
+        max_thresh = float(active_thresholds.max())
+
+        spmat = KDTree(active_coords).sparse_distance_matrix(
+            KDTree(solvent_coords),
+            max_distance=np.nextafter(max_thresh, 0.0),
+            output_type="coo_matrix",
         )
-        mask[solvent_chain_indices[clashes_with_nonsolvent]] = False
-    else:
-        clashes_with_nonsolvent = np.zeros(len(solvent_chain_indices), dtype=bool)
+        if spmat.nnz > 0:
+            flagged = spmat.data < active_thresholds[spmat.row]
+            clashes_protein[spmat.col[flagged]] = True
 
-    surviving_chain_indices = solvent_chain_indices[~clashes_with_nonsolvent]
-    surviving_coords = solvent_coords[~clashes_with_nonsolvent]
-    print(f"Number of surviving waters after clash with protein: {len(surviving_chain_indices)}")
+    mask[solvent_chain_indices[clashes_protein]] = False
+    surviving_chain_indices = solvent_chain_indices[~clashes_protein]
+    surviving_coords = solvent_coords[~clashes_protein]
+    print(f"Number of surviving waters after protein clash (per-element vdW): {len(surviving_chain_indices)}")
     if len(surviving_chain_indices) == 0:
         return rebuild_structure_with_mask(structure, mask)
 
+    # Stage 2: greedy solvent-solvent clash
     proposed_water_kdtree = KDTree(surviving_coords)
     clash_neighbors = proposed_water_kdtree.query_ball_tree(
         proposed_water_kdtree,
-        r=solvent_clash_radius,
+        r=np.nextafter(solvent_clash_rad, 0.0),
     )
 
     blocked = np.zeros(len(surviving_chain_indices), dtype=bool)
@@ -444,5 +556,5 @@ def filter_solvent_clashes(
             blocked[j] = True
             mask[surviving_chain_indices[j]] = False
 
-    print(f"Number of surviving waters after clash with other waters: {np.sum(mask[surviving_chain_indices])}")
+    print(f"Number of surviving waters after solvent-solvent clash: {np.sum(mask[surviving_chain_indices])}")
     return rebuild_structure_with_mask(structure, mask)
